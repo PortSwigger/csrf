@@ -8,4 +8,4 @@ ProOnly: True
 Author: Adrian Hayter
 ShortDescription: Passively scans for CSRF vulnerabilities.
 EntryPoint: build/libs/csrf-scanner-all.jar
-BuildCommand: gradle -PburpJar=$BURP_JAR fatJar
+BuildCommand: gradle fatJar
