@@ -2,7 +2,7 @@ Uuid: 60f172f27a9b49a1b538ed414f9f27c3
 ExtensionType: 1
 Name: CSRF Scanner
 RepoName: csrf-scanner
-ScreenVersion: 1.1
+ScreenVersion: 1.2
 SerialVersion: 2
 MinPlatformVersion: 0
 ProOnly: True
