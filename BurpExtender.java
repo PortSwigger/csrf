@@ -36,6 +36,7 @@ import java.net.URLDecoder;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -90,6 +91,8 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final String TOKEN_IN_RESPONSE_FORM = "Anti-CSRF token detected in form";
     
     // Defaults
+    private final boolean DEFAULT_ONLY_SCAN_INSCOPE = true;
+    private final boolean DEFAULT_REPORT_NO_PARAMS = false;
     private final String[] DEFAULT_METHOD_LIST = {"POST", "PUT", "DELETE", "PATCH"};
     private final boolean DEFAULT_GET_METHOD = false;
     private final boolean DEFAULT_POST_METHOD = true;
@@ -105,6 +108,8 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     private final boolean DEFAULT_FOUND_TOKEN_FORMS = false;
     
     // Settings
+    private JCheckBox onlyScanInScope;
+    private JCheckBox reportNoParams;
     private DefaultListModel<String> methods;
     private JCheckBox getMethod;
     private JCheckBox postMethod;
@@ -142,9 +147,9 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             public void run()
             {
                 DEFAULT_TOKENS.add(new LiteralToken("token", false));
-                DEFAULT_TOKENS.add(new LiteralToken("csrf", false));
-                DEFAULT_TOKENS.add(new RegexToken("csrf(-|_)?token", false));
-                DEFAULT_TOKENS.add(new RegexToken("anti(csrf|forgery)(token)?", false));
+                DEFAULT_TOKENS.add(new RegexToken("(x|c)srf", false));
+                DEFAULT_TOKENS.add(new RegexToken("(x|c)srf(-|_)?token", false));
+                DEFAULT_TOKENS.add(new RegexToken("anti((x|c)srf|forgery)(token)?", false));
                 DEFAULT_TOKENS.add(new RegexToken("(__)?RequestVerificationToken", false));
                 DEFAULT_TOKENS.add(new LiteralToken("ViewStateUserKey", true));
                 DEFAULT_TOKENS.add(new LiteralToken("forgery", false));
@@ -154,6 +159,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 DEFAULT_TOKENS.add(new LiteralToken("_token", false));
                 DEFAULT_TOKENS.add(new LiteralToken("_csrfToken", false));
                 DEFAULT_TOKENS.add(new LiteralToken("_csrf", false));
+                DEFAULT_TOKENS.add(new RegexToken("(X-)?XSRF-TOKEN", false));
                 
                 panel = new JPanel();
                 scroll = new JScrollPane(panel, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
@@ -170,6 +176,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 JLabel csrfSettingsLabel = new JLabel("Scanner Settings");
                 csrfSettingsLabel.setFont(new Font(csrfSettingsLabel.getFont().getName(), Font.PLAIN, 11));
                 csrfSettingsLabel.setForeground(FONT_COLOR);
+                
+                onlyScanInScope = new JCheckBox("Only scan requests which are considered in-scope.");
+                
+                reportNoParams = new JCheckBox("Report requests that contain no parameters. This may cause an increase in false positives, but may be required when testing apps with REST-like URLs.");
                 
                 JLabel methodDesc = new JLabel("<html>Select the HTTP request methods to scan.</html>");
                 methodDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
@@ -561,7 +571,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         + "to ensure all vulnerable requests / forms are identified.</html>");
                 noTokenDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
                 JLabel noTokenLabel = new JLabel("Passively scan and report when anti-CSRF tokens are not detected in:");
-                noTokenRequests = new JCheckBox("Request Parameters (URL Query & HTTP Body)");
+                noTokenRequests = new JCheckBox("Request Parameters & Headers");
                 noTokenForms = new JCheckBox("Response Forms");
                 
                 JLabel detectedTokenLabel = new JLabel("Detected Token Checks");
@@ -576,7 +586,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 
                 JLabel foundTokenLabel = new JLabel("Passively scan and report when anti-CSRF tokens are detected in:");
                 
-                foundTokenRequests = new JCheckBox("Request Parameters (URL Query & HTTP Body)");
+                foundTokenRequests = new JCheckBox("Request Parameters & Headers");
                 foundTokenForms = new JCheckBox("Response Forms");
                 
                 JButton saveSettings = new JButton("Save Settings");
@@ -617,6 +627,8 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         .addComponent(title)
                         .addComponent(desc)
                         .addComponent(csrfSettingsLabel)
+                        .addComponent(onlyScanInScope)
+                        .addComponent(reportNoParams)
                         .addComponent(methodDesc)
                         .addGroup(layout.createSequentialGroup()
                         .addComponent(getMethod)
@@ -665,6 +677,9 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         .addGap(15)
                                 
                         .addComponent(csrfSettingsLabel)
+                        .addComponent(onlyScanInScope)
+                        .addComponent(reportNoParams)
+                        .addGap(10)
                         .addComponent(methodDesc)
                         .addGroup(layout.createParallelGroup()
                         .addComponent(getMethod)
@@ -725,6 +740,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     {
         this.callbacks.saveExtensionSetting("save", "1");
         
+        this.callbacks.saveExtensionSetting("onlyScanInScope", Boolean.toString(onlyScanInScope.isSelected()));
+        
+        this.callbacks.saveExtensionSetting("reportNoParams", Boolean.toString(reportNoParams.isSelected()));
+        
         this.callbacks.saveExtensionSetting("getMethod", Boolean.toString(getMethod.isSelected()));
         this.callbacks.saveExtensionSetting("postMethod", Boolean.toString(postMethod.isSelected()));
         this.callbacks.saveExtensionSetting("putMethod", Boolean.toString(putMethod.isSelected()));
@@ -751,6 +770,24 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         }
         else
         {
+            if (this.callbacks.loadExtensionSetting("onlyScanInScope") != null)
+            {
+                onlyScanInScope.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("onlyScanInScope")));
+            }
+            else
+            {
+                onlyScanInScope.setSelected(DEFAULT_ONLY_SCAN_INSCOPE);
+            }
+            
+            if (this.callbacks.loadExtensionSetting("reportNoParams") != null)
+            {
+                reportNoParams.setSelected(Boolean.parseBoolean(this.callbacks.loadExtensionSetting("reportNoParams")));
+            }
+            else
+            {
+                reportNoParams.setSelected(DEFAULT_REPORT_NO_PARAMS);
+            }
+            
             methods.removeAllElements();
             
             if (this.callbacks.loadExtensionSetting("getMethod") != null)
@@ -860,19 +897,29 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                         tokens = (ArrayList<Token>) stringToObject(this.callbacks.loadExtensionSetting("tokens"));
                     }
                     
-                    tokenTableModel.setArray(tokens);
+                    tokenTableModel.getArray().clear();
+                    for (Token t : tokens)
+                    {
+                        tokenTableModel.getArray().add(t);
+                    }
                 }
                 catch (Exception e)
                 {
-                    System.out.println(e.getMessage());
+                    System.err.println(e.getMessage());
                     tokenTableModel.getArray().clear();
-                    tokenTableModel.setArray(DEFAULT_TOKENS);
+                    for (Token t : DEFAULT_TOKENS)
+                    {
+                        tokenTableModel.getArray().add(t);
+                    }
                 }
             }
             else
             {
                 tokenTableModel.getArray().clear();
-                tokenTableModel.setArray(DEFAULT_TOKENS);
+                for (Token t : DEFAULT_TOKENS)
+                {
+                    tokenTableModel.getArray().add(t);
+                }
             }
             tokenTableModel.fireTableDataChanged();
             
@@ -937,6 +984,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
     {
         this.callbacks.saveExtensionSetting("save", "2");
         
+        onlyScanInScope.setSelected(DEFAULT_ONLY_SCAN_INSCOPE);
+        
+        reportNoParams.setSelected(DEFAULT_REPORT_NO_PARAMS);
+        
         methods.removeAllElements();
         for (String s : DEFAULT_METHOD_LIST)
         {
@@ -950,7 +1001,10 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         patchMethod.setSelected(DEFAULT_PATCH_METHOD);
         
         tokenTableModel.getArray().clear();
-        tokenTableModel.setArray(DEFAULT_TOKENS);
+        for (Token t : DEFAULT_TOKENS)
+        {
+            tokenTableModel.getArray().add(t);
+        }
         tokenTableModel.fireTableDataChanged();
         
         tokenLengthCheck.setSelected(DEFAULT_MIN_TOKEN);
@@ -1012,18 +1066,17 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
 
     @Override public List<IScanIssue> doPassiveScan(IHttpRequestResponse baseRequestResponse)
     {
-        if (callbacks.isInScope(helpers.analyzeRequest(baseRequestResponse).getUrl()))
+        if (!onlyScanInScope.isSelected() || callbacks.isInScope(helpers.analyzeRequest(baseRequestResponse).getUrl()))
         {
-            List<IScanIssue> issues = new ArrayList<IScanIssue>();
-            List<int[]> noTokenRequestQueryHighlights = new ArrayList<int[]>(1);
-            List<int[]> noTokenRequestHighlights = new ArrayList<int[]>(1);
-            List<int[]> noTokenFormsHighlights = new ArrayList<int[]>(1);
+            List<IScanIssue> issues = new ArrayList<>();
+            List<int[]> noTokenRequestHighlights = new ArrayList<>();
+            List<int[]> noTokenFormsHighlights = new ArrayList<>();
             
-            List<int[]> minRequestTokenLengthHighlights = new ArrayList<int[]>(1);
-            List<int[]> minResponseTokenLengthHighlights = new ArrayList<int[]>(1);
+            List<int[]> minRequestTokenLengthHighlights = new ArrayList<>();
+            List<int[]> minResponseTokenLengthHighlights = new ArrayList<>();
 
-            List<int[]> foundTokenRequestHighlights = new ArrayList<int[]>(1);
-            List<int[]> foundTokenFormsHighlights = new ArrayList<int[]>(1);
+            List<int[]> foundTokenRequestHighlights = new ArrayList<>();
+            List<int[]> foundTokenFormsHighlights = new ArrayList<>();
 
             int requestOffset = helpers.analyzeResponse(baseRequestResponse.getRequest()).getBodyOffset();
             String requestBody = new String(baseRequestResponse.getRequest()).substring(requestOffset);
@@ -1032,14 +1085,95 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
             String responseBody = new String(baseRequestResponse.getResponse()).substring(responseOffset);
 
             int start = 0, end = 0, next = 0;
+            boolean requestTokenFound = false;
             boolean token = false;
             String tokenValue = "";
             
-            if (methods.contains(helpers.analyzeRequest(baseRequestResponse).getMethod()))
+            IRequestInfo request = helpers.analyzeRequest(baseRequestResponse);
+            
+            if (methods.contains(request.getMethod()))
             {
-                List<IParameter> params = helpers.analyzeRequest(baseRequestResponse).getParameters();
-                if (!params.isEmpty())
+                List<IParameter> params = request.getParameters();
+                
+                // Remove invalid parameters (i.e. cookies)
+                for (Iterator<IParameter> iterator = params.iterator(); iterator.hasNext();)
                 {
+                    IParameter param = iterator.next();
+                    
+                    if (param.getType() == IParameter.PARAM_COOKIE)
+                    {
+                        iterator.remove();
+                    }
+                }
+                
+                if (reportNoParams.isSelected() || !params.isEmpty())
+                {
+                    List<String> headers = request.getHeaders();
+                    if (!headers.isEmpty())
+                    {
+                        boolean isRequestLine = true;
+                        for (String header : headers)
+                        {
+                            if (isRequestLine) // Skip the first header.
+                            {
+                                isRequestLine = false;
+                                continue;
+                            }
+                            
+                            String[] headerArray = header.split(":", 2);
+
+                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
+                            {
+                                if (tokenTableModel.getToken(i).matches(headerArray[0].trim()))
+                                {
+                                    token = true;
+                                    requestTokenFound = true;
+                                    if (headerArray.length == 2)
+                                    {
+                                        tokenValue = headerArray[1].trim();
+                                    }
+                                    else
+                                    {
+                                        tokenValue = "";
+                                    }
+                                    start = new String(baseRequestResponse.getRequest()).indexOf(header);
+                                    end = start + header.length();
+                                    break;
+                                }
+                            }
+                            
+                            if (token)
+                            {
+                                break;
+                            }
+                        }
+
+                        if (token)
+                        {
+                            if (foundTokenRequests.isSelected())
+                            {
+                                foundTokenRequestHighlights.add(new int[] {start, end});
+                            }
+
+                            if (tokenLengthCheck.isSelected())
+                            {    
+                                try
+                                {
+                                    if (URLDecoder.decode(tokenValue, "UTF-8").length() < minTokenLength)
+                                    {
+                                        minRequestTokenLengthHighlights.add(new int[] {start, end});
+                                    }
+                                }
+                                catch (UnsupportedEncodingException e){}
+                            }
+                        }
+                    }
+
+                    token = false;
+                    start = 0;
+                    end = 0;
+                    next = 0;
+                    
                     for (IParameter param : params)
                     {
                         if (param.getType() == IParameter.PARAM_BODY
@@ -1054,29 +1188,22 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                                 if (tokenTableModel.getToken(i).matches(param.getName()))
                                 {
                                     token = true;
+                                    requestTokenFound = true;
                                     tokenValue = param.getValue();
                                     start = param.getNameStart();
                                     end = param.getValueEnd();
                                     break;
                                 }
                             }
+                            
+                            if (token)
+                            {
+                                break;
+                            }
                         }
                     }
 
-                    if (!token)
-                    {
-                        if (noTokenRequests.isSelected())
-                        {
-                            String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
-                            if (query != null)
-                            {
-                                int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
-                                noTokenRequestQueryHighlights.add(new int[] {queryStart, queryStart + query.length()});
-                            }
-                            noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
-                        }
-                    }
-                    else
+                    if (token)
                     {
                         if (foundTokenRequests.isSelected())
                         {
@@ -1093,6 +1220,20 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                                 }
                             }
                             catch (UnsupportedEncodingException e){}
+                        }
+                    }
+                    
+                    if (!requestTokenFound)
+                    {
+                        if (noTokenRequests.isSelected())
+                        {
+                            String query = helpers.analyzeRequest(baseRequestResponse).getUrl().getQuery();
+                            if (query != null)
+                            {
+                                int queryStart = new String(baseRequestResponse.getRequest()).indexOf(query);
+                                noTokenRequestHighlights.add(new int[] {queryStart, queryStart + query.length()});
+                            }
+                            noTokenRequestHighlights.add(new int[] {requestOffset, requestOffset + requestBody.length()});
                         }
                     }
                 }
@@ -1166,47 +1307,17 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 }
             }
 
-            if (!noTokenRequestQueryHighlights.isEmpty() && !noTokenRequestHighlights.isEmpty())
-            {
-                noTokenRequestQueryHighlights.addAll(noTokenRequestHighlights);
-                
+            if (!noTokenRequestHighlights.isEmpty())
+            {                
                 issues.add(new CSRFScanIssue(
                         NO_TOKEN_IN_REQUEST_PARAMS,
                         baseRequestResponse.getHttpService(),
                         helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, noTokenRequestQueryHighlights, null)},
+                        new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, noTokenRequestHighlights, null)},
                         "High",
                         "Tentative",
-                        "The request parameters do not appear to contain an anti-CSRF token."
+                        "The request does not appear to contain an anti-CSRF token."
                     ));
-            }
-            else
-            {
-                if (!noTokenRequestQueryHighlights.isEmpty())
-                {
-                    issues.add(new CSRFScanIssue(
-                        NO_TOKEN_IN_REQUEST_PARAMS,
-                        baseRequestResponse.getHttpService(),
-                        helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] {callbacks.applyMarkers(baseRequestResponse, noTokenRequestQueryHighlights, null)},
-                        "High",
-                        "Tentative",
-                        "The request URL parameters do not appear to contain an anti-CSRF token."
-                    ));
-                }
-
-                if (!noTokenRequestHighlights.isEmpty())
-                {
-                    issues.add(new CSRFScanIssue(
-                        NO_TOKEN_IN_REQUEST_PARAMS,
-                        baseRequestResponse.getHttpService(),
-                        helpers.analyzeRequest(baseRequestResponse).getUrl(), 
-                        new IHttpRequestResponse[] {callbacks.applyMarkers(baseRequestResponse, noTokenRequestHighlights, null)},
-                        "High",
-                        "Tentative",
-                        "The request body parameters do not appear to contain an anti-CSRF token."
-                    ));
-                }
             }
             
             if (!foundTokenRequestHighlights.isEmpty())
@@ -1218,7 +1329,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, foundTokenRequestHighlights, null)},
                     "Information",
                     "Firm",
-                    "The request parameters appear to contain an anti-CSRF token. It is suggested that the request "
+                    "The request appears to contain an anti-CSRF token. It is suggested that the request "
                         + "be replayed both without and with a modified token to see if it is implemented properly."
                 ));
             }
@@ -1232,7 +1343,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                     new IHttpRequestResponse[] { callbacks.applyMarkers(baseRequestResponse, minRequestTokenLengthHighlights, null)},
                     "Medium",
                     "Firm",
-                    "The request parameters appear to contain an anti-CSRF token with a value that is "
+                    "The request appears to contain an anti-CSRF token with a value that is "
                         + "less than " + minTokenLength + " characters long. An attacker may be able to guess "
                         + "this token's value."
                 ));
@@ -1336,108 +1447,118 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
         
         if (newIssue.getIssueName().equals(existingIssue.getIssueName()))
         {
-            if (helpers.analyzeRequest(newIssue.getHttpMessages()[0]).getUrl().getPath().equals(helpers.analyzeRequest(existingIssue.getHttpMessages()[0]).getUrl().getPath()))
+            IRequestInfo newRequest = helpers.analyzeRequest(newIssue.getHttpMessages()[0]);
+            IRequestInfo existingRequest = helpers.analyzeRequest(existingIssue.getHttpMessages()[0]);
+            
+            if (newRequest.getMethod().equals(existingRequest.getMethod()))
             {
-                List<IParameter> originalNewParams = helpers.analyzeRequest(newIssue.getHttpMessages()[0]).getParameters();
-                List<IParameter> originalExistingParams = helpers.analyzeRequest(existingIssue.getHttpMessages()[0]).getParameters();
-
-                // Rebuild parameter lists.
-                List<IParameter> newParams = new LinkedList<IParameter>();
-                for (IParameter param : originalNewParams)
+                if (newRequest.getUrl().getPath().equals(existingRequest.getUrl().getPath()))
                 {
-                    if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+                    List<IParameter> originalNewParams = newRequest.getParameters();
+                    List<IParameter> originalExistingParams = existingRequest.getParameters();
+
+                    // Rebuild parameter lists.
+                    List<IParameter> newParams = new LinkedList<IParameter>();
+                    for (IParameter param : originalNewParams)
                     {
-                        if (newIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
+                        if (param.getType() != IParameter.PARAM_COOKIE)
                         {
-                            boolean token = false;
-                            
-                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
+                            if (newIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
                             {
-                                if (tokenTableModel.getToken(i).matches(param.getName()))
+                                boolean token = false;
+
+                                for (int i = 0; i < tokenTableModel.getRowCount(); i++)
                                 {
-                                    token = true;
-                                    break;
+                                    if (tokenTableModel.getToken(i).matches(param.getName()))
+                                    {
+                                        token = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!token)
+                                {
+                                    newParams.add(param);
                                 }
                             }
-                            
-                            if (!token)
+                            else
                             {
                                 newParams.add(param);
                             }
                         }
-                        else
-                        {
-                            newParams.add(param);
-                        }
                     }
-                }
-                
-                List<IParameter> existingParams = new LinkedList<IParameter>();
-                for (IParameter param : originalExistingParams)
-                {
-                    if (param.getType() == IParameter.PARAM_BODY || param.getType() == IParameter.PARAM_URL)
+
+                    List<IParameter> existingParams = new LinkedList<IParameter>();
+                    for (IParameter param : originalExistingParams)
                     {
-                        if (existingIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
+                        if (param.getType() != IParameter.PARAM_COOKIE)
                         {
-                            boolean token = false;
-                            
-                            for (int i = 0; i < tokenTableModel.getRowCount(); i++)
+                            if (existingIssue.getIssueName().equals(TOKEN_IN_REQUEST_PARAMS)) // Prevents duplicate tokens being reported.
                             {
-                                if (tokenTableModel.getToken(i).matches(param.getName()))
+                                boolean token = false;
+
+                                for (int i = 0; i < tokenTableModel.getRowCount(); i++)
                                 {
-                                    token = true;
-                                    break;
+                                    if (tokenTableModel.getToken(i).matches(param.getName()))
+                                    {
+                                        token = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!token)
+                                {
+                                    existingParams.add(param);
                                 }
                             }
-                            
-                            if (!token)
+                            else
                             {
                                 existingParams.add(param);
                             }
                         }
+                    }
+
+                    if (newParams.size() == existingParams.size())
+                    {
+                        if (newParams.isEmpty())
+                        {
+                            return DO_NOT_ADD_NEW_ISSUE;
+                        }
                         else
                         {
-                            existingParams.add(param);
+                            for (IParameter newParam : newParams)
+                            {
+                                boolean paramsMatch = false;
+
+                                for (IParameter existingParam : existingParams)
+                                {
+                                    if (newParam.getType() == existingParam.getType() && newParam.getName().equals(existingParam.getName()) && newParam.getValue().equals(existingParam.getValue()))
+                                    {
+                                        paramsMatch = true;
+                                        break;
+                                    }
+                                }
+
+                                if (paramsMatch == false)
+                                {
+                                    return ADD_NEW_ISSUE;
+                                }
+                            }
+
+                            return DO_NOT_ADD_NEW_ISSUE;
                         }
-                    }
-                }
-                
-                if (newParams.size() == existingParams.size())
-                {
-                    if (newParams.isEmpty())
-                    {
-                        return DO_NOT_ADD_NEW_ISSUE;
                     }
                     else
                     {
-                        for (IParameter newParam : newParams)
-                        {
-                            boolean paramsMatch = false;
-                            
-                            for (IParameter existingParam : existingParams)
-                            {
-                                if (newParam.getName().equals(existingParam.getName()) && newParam.getValue().equals(existingParam.getValue()))
-                                {
-                                    paramsMatch = true;
-                                    break;
-                                }
-                            }
-                            
-                            if (paramsMatch == false)
-                            {
-                                return ADD_NEW_ISSUE;
-                            }
-                        }
-                        
-                        return DO_NOT_ADD_NEW_ISSUE;
+                        return ADD_NEW_ISSUE;
                     }
                 }
-                else
+                else // If the new issue has a different path to the existing issue, it should be added.
                 {
                     return ADD_NEW_ISSUE;
                 }
             }
-            else // If the new issue has a different path to the existing issue, it should be added.
+            else // If the new issue has a different HTTP method to the existing issue, it should be added.
             {
                 return ADD_NEW_ISSUE;
             }
