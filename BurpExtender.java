@@ -182,6 +182,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 reportNoParams = new JCheckBox("Report requests that contain no parameters. This may cause an increase in false positives, but may be required when testing apps with REST-like URLs.");
                 
                 JLabel methodDesc = new JLabel("<html>Select the HTTP request methods to scan.</html>");
+                methodDesc.putClientProperty("html.disable", null);
                 methodDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
                 
                 methods = new DefaultListModel<String>();
@@ -569,6 +570,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 JLabel noTokenDesc = new JLabel("<html>Anti-CSRF tokens are generally found in request parameters "
                         + "and in HTML forms contained within the response. It is recommended that both are scanned "
                         + "to ensure all vulnerable requests / forms are identified.</html>");
+                noTokenDesc.putClientProperty("html.disable", null);
                 noTokenDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
                 JLabel noTokenLabel = new JLabel("Passively scan and report when anti-CSRF tokens are not detected in:");
                 noTokenRequests = new JCheckBox("Request Parameters & Headers");
@@ -582,6 +584,7 @@ public class BurpExtender implements IBurpExtender, IScannerCheck, ITab
                 + "if the anti-CSRF token is modified or removed. It is important to perform manual tests on "
                 + "these tokens for this reason, so knowing when they appear is also important. The following two "
                 + "checks can help with this testing by reporting instances when anti-CSRF tokens appear.</html>");
+                foundTokenDesc.putClientProperty("html.disable", null);
                 foundTokenDesc.setPreferredSize(new Dimension(panel.getWidth(), 100));
                 
                 JLabel foundTokenLabel = new JLabel("Passively scan and report when anti-CSRF tokens are detected in:");
